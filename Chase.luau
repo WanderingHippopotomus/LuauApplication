@@ -2,26 +2,27 @@ local Pathfinding = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
 local Debris = game:GetService("Debris")
 
+-- tweak these to change behaviour
 local CONFIG = {
-	WalkSpeed = 16,
+	WalkSpeed = 14,
 	SprintSpeed = 20,
-	SlowSpeed = 10,
+	SlowSpeed = 8,
 	BaseJumpPower = 50,
 	MaxJumpPower = 110,
 
 	SightRange = 180,
-	AttackRange = 4,
+	AttackRange = 4,    -- studs before kill triggers
 	SprintDist = 40,
 	SlowDist = 10,
 
-	StuckThreshold = 2.0,
-	MovementThreshold = 1.2,
-	MaxRecovery = 5,
+	StuckThreshold = 2.0,       -- seconds before declaring stuck
+	MovementThreshold = 1.2,    -- studs moved per tick to not count as stuck
+	MaxRecovery = 5,            -- attempts before teleporting
 
 	TeleportDist = 12,
 	TeleportCooldown = 6,
 
-	PathUpdateRate = 0.35,
+	PathUpdateRate = 0.35,  -- recompute path at most this often
 	WanderDelay = 4,
 	WanderRadius = 20,
 }
@@ -39,6 +40,7 @@ local normalPath = Pathfinding:CreatePath({
 	Costs = { Water = 100 },
 })
 
+-- tighter params for when normal path keeps getting blocked
 local precisePath = Pathfinding:CreatePath({
 	AgentHeight = 5,
 	AgentRadius = 2,
@@ -63,6 +65,7 @@ local state = {
 	blockedConn = nil,
 }
 
+-- raycast that ignores our own character
 local function rayEx(origin, dir)
 	local p = RaycastParams.new()
 	p.FilterType = Enum.RaycastFilterType.Exclude
@@ -75,6 +78,7 @@ local function disconnectPath()
 	if state.blockedConn then state.blockedConn:Disconnect(); state.blockedConn = nil end
 end
 
+-- slight random variance so speed changes don't look robotic
 local function setSpeed(s)
 	Humanoid.WalkSpeed = s + math.random(-1, 1)
 end
@@ -90,6 +94,7 @@ local function doJump(heightDiff)
 	end)
 end
 
+-- wire up touch kill on every body part so the hitbox is the full character
 local function setupKillTouch()
 	for _, part in ipairs(Character:GetDescendants()) do
 		if part:IsA("BasePart") then
@@ -109,6 +114,7 @@ local function setupKillTouch()
 	end
 end
 
+-- returns nearest alive player and their distance
 local function findTarget()
 	local nearest, nearestDist = nil, CONFIG.SightRange
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -127,6 +133,7 @@ local function findTarget()
 	return nearest, nearestDist
 end
 
+-- backup kill check each frame in case touch didn't fire
 local function killIfClose(char)
 	if not char then return end
 	local hum = char:FindFirstChildOfClass("Humanoid")
@@ -147,6 +154,7 @@ local function updateSpeed(dist)
 	end
 end
 
+-- checks for a wall or gap directly in front of the character
 local function detectObstacle()
 	local forward = Root.CFrame.LookVector
 	local pos = Root.Position
@@ -181,6 +189,7 @@ local function followPath(dest)
 
 	disconnectPath()
 
+	-- recompute in precision mode if something blocks the current path
 	state.blockedConn = p.Blocked:Connect(function(idx)
 		if idx >= state.waypointIndex then
 			disconnectPath()
@@ -207,6 +216,7 @@ local function followPath(dest)
 	Humanoid:MoveTo(state.waypoints[2].Position)
 end
 
+-- last resort: snap close to the target so we don't get permanently stuck
 local function tryTeleport(targetPos)
 	local now = tick()
 	if now - state.lastTeleportTime < CONFIG.TeleportCooldown then return false end
@@ -237,6 +247,7 @@ local function isStuck()
 	return false
 end
 
+-- escalating recovery: jump -> strafe left -> body impulse -> strafe right -> teleport
 local function handleStuck(targetPos)
 	state.recoveryAttempt += 1
 	state.consecutiveStuck += 1
@@ -271,6 +282,7 @@ local function handleStuck(targetPos)
 	end)
 end
 
+-- roam randomly when no player is in range
 local function doWander()
 	local now = tick()
 	if now - state.lastWanderTime < CONFIG.WanderDelay then return end
