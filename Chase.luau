@@ -24,7 +24,7 @@ local CONFIG = {
 	SprintSpeed = 20,
 	SlowSpeed   = 10,
 
-	-- Jump forces (used with LinearVelocity impulse, not the deprecated JumpPower)
+	-- Jump forces
 	BaseJumpImpulse = 50,
 	MaxJumpImpulse  = 110,
 
@@ -256,7 +256,7 @@ end
 -- SPEED MANAGEMENT
 -------------------------------------------------------
 
---- Adjust walk speed based on distance to target.
+-- Adjust walk speed based on distance to target.
 local function updateChaseSpeed(dist: number)
 	if dist > CONFIG.SprintDist then
 		applySpeed(CONFIG.SprintSpeed)
