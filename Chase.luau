@@ -1,22 +1,23 @@
 --!strict
 
--- ─────────────────────────────────────────────────────────────────────────────
--- NpcAI.luau  –  Chasing / pathfinding enemy NPC
---
--- Drop this LocalScript (or Script) inside the NPC model.
--- The NPC will:
---   • Wander when no player is visible.
---   • Sprint toward the nearest player once they enter SightRange.
---   • Kill any player it touches OR reaches within AttackRange.
---   • Attempt several stuck-recovery strategies before teleporting.
--- ─────────────────────────────────────────────────────────────────────────────
+--[[
+Path Finding AI
+The AI Will:
+- Wander when no player is visible.
+- Sprint toward the nearest player once they enter SightRange.
+- Kill any player it touches OR reaches within AttackRange.
+- Attempt several stuck-recovery strategies before teleporting.
+
+* Script resides inside AI Model in Workspace
+]]--
 
 local PathfindingService = game:GetService("PathfindingService")
 local Players           = game:GetService("Players")
 local Debris            = game:GetService("Debris")
 
--- ── Tunable constants ────────────────────────────────────────────────────────
-
+-------------------------------------------------------
+-- Tunable constants
+-------------------------------------------------------
 local CONFIG = {
 	-- Movement speeds
 	WalkSpeed   = 16,
@@ -48,13 +49,16 @@ local CONFIG = {
 	WanderRadius   = 20,   -- studs; maximum wander displacement
 }
 
--- ── Character references ─────────────────────────────────────────────────────
-
+-------------------------------------------------------
+-- Character references
+-------------------------------------------------------
 local NpcModel  = script.Parent
 local Humanoid  = NpcModel:WaitForChild("Humanoid") :: Humanoid
 local RootPart  = NpcModel:WaitForChild("HumanoidRootPart") :: BasePart
 
--- ── Path objects ─────────────────────────────────────────────────────────────
+-------------------------------------------------------
+-- Path objects
+-------------------------------------------------------
 -- normalPath   – used for general navigation; allows jumping and climbing.
 -- precisePath  – used when normalPath is blocked; tighter radius, no jumping.
 
@@ -75,8 +79,9 @@ local precisePath = PathfindingService:CreatePath({
 	AgentCanClimb = true,
 })
 
--- ── Mutable runtime state ────────────────────────────────────────────────────
-
+-------------------------------------------------------
+--Mutable runtime state
+-------------------------------------------------------
 local navState = {
 	-- Stuck detection
 	stuckTimer       = 0,
@@ -106,11 +111,11 @@ local navState = {
 	blockedConn = nil :: RBXScriptConnection?,
 }
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- UTILITY HELPERS
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Cast a ray while excluding the NPC's own parts.
+-- Cast a ray while excluding the NPC's own parts.
 local function castRay(origin: Vector3, direction: Vector3): RaycastResult?
 	local params = RaycastParams.new()
 	params.FilterType                  = Enum.RaycastFilterType.Exclude
@@ -118,7 +123,7 @@ local function castRay(origin: Vector3, direction: Vector3): RaycastResult?
 	return workspace:Raycast(origin, direction, params)
 end
 
---- Disconnect both path event listeners and nil their references.
+-- Disconnect both path event listeners and nil their references.
 local function disconnectPathEvents()
 	if navState.reachedConn then
 		navState.reachedConn:Disconnect()
@@ -177,11 +182,11 @@ local function performJump(heightDifference: number)
 	end)
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- KILL-ON-TOUCH
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Wire up Touched events on every NPC part so contact kills the player.
+-- Wire up Touched events on every NPC part so contact kills the player.
 local function setupKillOnTouch()
 	for _, part in NpcModel:GetDescendants() do
 		if not part:IsA("BasePart") then continue end
@@ -205,11 +210,11 @@ local function setupKillOnTouch()
 	end
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- TARGET DETECTION
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Return the nearest living player character within SightRange, plus distance.
+-- Return the nearest living player character within SightRange, plus distance.
 local function findNearestTarget(): (Model?, number)
 	local bestTarget: Model? = nil
 	local bestDist = CONFIG.SightRange
@@ -234,7 +239,7 @@ local function findNearestTarget(): (Model?, number)
 	return bestTarget, bestDist
 end
 
---- Instantly kill the target if it is within AttackRange.
+-- Instantly kill the target if it is within AttackRange.
 local function killIfInRange(targetChar: Model)
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not targetRoot then return end
@@ -247,9 +252,9 @@ local function killIfInRange(targetChar: Model)
 	end
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- SPEED MANAGEMENT
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
 --- Adjust walk speed based on distance to target.
 local function updateChaseSpeed(dist: number)
@@ -262,14 +267,14 @@ local function updateChaseSpeed(dist: number)
 	end
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- OBSTACLE DETECTION
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
 type ObstacleKind = "wall" | "gap" | "none"
 
---- Look ahead with two rays to detect walls and ledge gaps.
---- Returns the obstacle type and a numeric payload (wall height or gap depth).
+-- Look ahead with two rays to detect walls and ledge gaps.
+-- Returns the obstacle type and a numeric payload (wall height or gap depth).
 local function detectObstacleAhead(): (ObstacleKind, number)
 	local forward = RootPart.CFrame.LookVector
 	local pos     = RootPart.Position
@@ -292,12 +297,12 @@ local function detectObstacleAhead(): (ObstacleKind, number)
 	return "none", 0
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- PATHFINDING
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Compute a path to `destination` and begin following it waypoint by waypoint.
---- Falls back to a direct MoveTo if pathfinding fails.
+-- Compute a path to `destination` and begin following it waypoint by waypoint.
+-- Falls back to a direct MoveTo if pathfinding fails.
 local function followPath(destination: Vector3)
 	local activePath = navState.precisionMode and precisePath or normalPath
 
@@ -351,12 +356,12 @@ local function followPath(destination: Vector3)
 	Humanoid:MoveTo(waypoints[2].Position)
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- TELEPORT (last-resort recovery)
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Teleport the NPC to a point behind the target, clearing all stuck state.
---- Returns true if the teleport actually happened (cooldown may prevent it).
+-- Teleport the NPC to a point behind the target, clearing all stuck state.
+-- Returns true if the teleport actually happened (cooldown may prevent it).
 local function teleportBehindTarget(targetPos: Vector3): boolean
 	if tick() - navState.lastTeleportTime < CONFIG.TeleportCooldown then
 		return false
@@ -383,11 +388,11 @@ local function teleportBehindTarget(targetPos: Vector3): boolean
 	return true
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- STUCK DETECTION
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Returns true once the NPC has barely moved for StuckThreshold seconds.
+-- Returns true once the NPC has barely moved for StuckThreshold seconds.
 local function checkIfStuck(): boolean
 	local moved = (RootPart.Position - navState.lastPosition).Magnitude
 
@@ -402,9 +407,9 @@ local function checkIfStuck(): boolean
 	return navState.stuckTimer >= CONFIG.StuckThreshold
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- STUCK RECOVERY  (ordered escalation, no deep nesting)
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
 -- Each recovery action is a self-contained function.
 -- They are indexed so handleStuck() can select by recoveryStep.
@@ -454,7 +459,7 @@ local recoveryActions: { (targetPos: Vector3) -> () } = {
 	end,
 }
 
---- Escalate to the next recovery strategy and execute it.
+-- Escalate to the next recovery strategy and execute it.
 local function handleStuck(targetPos: Vector3)
 	navState.recoveryStep     = math.min(navState.recoveryStep + 1, #recoveryActions)
 	navState.consecutiveStuck += 1
@@ -469,11 +474,11 @@ local function handleStuck(targetPos: Vector3)
 	end)
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- WANDER (idle behaviour)
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Pick a random nearby point on the ground and stroll toward it.
+-- Pick a random nearby point on the ground and stroll toward it.
 local function doWander()
 	if tick() - navState.lastWanderTime < CONFIG.WanderDelay then return end
 	navState.lastWanderTime = tick()
@@ -493,16 +498,16 @@ local function doWander()
 	Humanoid:MoveTo(target)
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- CHASE LOGIC  (called every tick when a target exists)
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
---- Hard teleport if we have been stuck too many times in a row.
+-- Hard teleport if we have been stuck too many times in a row.
 local function handleExtremeStuck(targetPos: Vector3)
 	teleportBehindTarget(targetPos)
 end
 
---- Normal frame: update speed, handle obstacles, recompute path if due.
+-- Normal frame: update speed, handle obstacles, recompute path if due.
 local function chaseTarget(targetPos: Vector3, dist: number)
 	-- Clear recovery state now that we are moving freely.
 	navState.recoveryStep     = 0
@@ -526,9 +531,9 @@ local function chaseTarget(targetPos: Vector3, dist: number)
 	followPath(targetPos)
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- MAIN LOOP
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
 local function main()
 	while true do
@@ -560,9 +565,9 @@ local function main()
 	end
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 -- INITIALISATION
--- ─────────────────────────────────────────────────────────────────────────────
+-------------------------------------------------------
 
 setupKillOnTouch()
 Humanoid.WalkSpeed     = CONFIG.WalkSpeed
